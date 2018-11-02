@@ -1194,6 +1194,8 @@ def _get_coord_names(wrfin, varname):
 
         try:
             time_coord = coord_names[2]
+            # DTD debug
+#             print("C: varname, time_coord: ", varname, time_coord)
         except IndexError:
             time_coord = None
         else:
@@ -1244,13 +1246,25 @@ def _build_data_array(wrfnc, varname, timeidx, is_moving_domain, is_multifile,
     # single file came from a sequence, and if that sequence is has a moving
     # domain.  Both arguments are used mainly for coordinate extraction and
     # caching.
+    # DTD: Need to modify this in the case that the variable doesn't contain a time index
+    # You should be able to choose timeidx = 0 and it just figures it out... Right now it just
+    # cuts off the first dimension, which will be south_north in the case that the time index isn't
+    # there! Workaround right now is to set timeidx to None or All_TIMES in the original getvar call
     multitime = is_multi_time_req(timeidx)
+    # DTD debug
+#     print("timeidx, multitime = ", timeidx, multitime)
     time_idx_or_slice = timeidx if not multitime else slice(None)
+    # DTD debug
+#     print("time_idx_or_slice = ", time_idx_or_slice)
     var = wrfnc.variables[varname]
+    # DTD debug
+#     print("var.shape = ", var.shape)
     if len(var.shape) > 1:
         data = var[time_idx_or_slice, :]
     else:
         data = var[time_idx_or_slice]
+    # DTD debug
+#     print("var.shape (2) = ", data.shape)
 
     # Want to preserve the time dimension
     if not multitime:
@@ -1258,6 +1272,8 @@ def _build_data_array(wrfnc, varname, timeidx, is_moving_domain, is_multifile,
             data = data[np.newaxis, :]
         else:
             data = data[np.newaxis]
+    # DTD debug
+#     print("var.shape (3) = ", data.shape)
 
     attrs = OrderedDict()
     for dkey, val in viewitems(var.__dict__):
@@ -1289,6 +1305,10 @@ def _build_data_array(wrfnc, varname, timeidx, is_moving_domain, is_multifile,
 
 
     coords = OrderedDict()
+
+    # DTD debug
+#     print("lon_coord, lat_coord: ", lon_coord, lat_coord)
+#     print("multitime = ", multitime)
 
     # Handle lat/lon coordinates and projection information if available
     if lon_coord is not None and lat_coord is not None:
@@ -1348,18 +1368,30 @@ def _build_data_array(wrfnc, varname, timeidx, is_moving_domain, is_multifile,
                 coords[lat_coord] = lat_coord_dims, lat_coord_vals
 
             else:
-                coords[lon_coord] = (lon_coord_dims[1:],
-                                     lon_coord_vals[0,:])
-                coords[lat_coord] = (lat_coord_dims[1:],
-                                     lat_coord_vals[0,:])
+                # DTD: fixed problem here if XLAT/XLONG don't have a time dimension.
+                # In this case, the south_north dimension gets cut off here in the original code
+                if time_coord is not None:
+                    coords[lon_coord] = (lon_coord_dims[1:],
+                                         lon_coord_vals[0,:])
+                    coords[lat_coord] = (lat_coord_dims[1:],
+                                         lat_coord_vals[0,:])
+                else:
+                    coords[lon_coord] = (lon_coord_dims, lon_coord_vals)
+                    coords[lat_coord] = (lat_coord_dims, lat_coord_vals)
 
             if time_coord is not None:
                 coords[time_coord] = (lon_coord_dims[0], time_coord_vals)
         else:
-            coords[lon_coord] = (lon_coord_dims[1:],
-                                 lon_coord_vals[timeidx,:])
-            coords[lat_coord] = (lat_coord_dims[1:],
-                                 lat_coord_vals[timeidx,:])
+            # DTD: fixed problem here if XLAT/XLONG don't have a time dimension.
+            # In this case, the south_north dimension gets cut off here in the original code
+            if time_coord is not None:
+                coords[lon_coord] = (lon_coord_dims[1:],
+                                     lon_coord_vals[timeidx,:])
+                coords[lat_coord] = (lat_coord_dims[1:],
+                                     lat_coord_vals[timeidx,:])
+            else:
+                coords[lon_coord] = (lon_coord_dims, lon_coord_vals)
+                coords[lat_coord] = (lat_coord_dims, lat_coord_vals)
 
             if time_coord is not None:
                 coords[time_coord] = (lon_coord_dims[0],
@@ -1374,6 +1406,12 @@ def _build_data_array(wrfnc, varname, timeidx, is_moving_domain, is_multifile,
         if not multitime:
             t = [t]
         coords[dimnames[0]] = t
+
+    # DTD debug
+#     print("varname: ", varname)
+#     print("dimnames: ", dimnames)
+#     print("time_coord: ", time_coord)
+    #print("coords: ", coords)
 
     data_array = DataArray(data, name=varname, dims=dimnames, coords=coords,
                            attrs=attrs)
@@ -2188,6 +2226,9 @@ def _extract_var(wrfin, varname, timeidx, is_moving,
 
     """
 
+    # DTD debug
+#     print("varname, meta = ", varname, meta)
+
     if cache is not None:
         try:
             cache_var = cache[varname]
@@ -2208,13 +2249,35 @@ def _extract_var(wrfin, varname, timeidx, is_moving,
 
     if not multifile:
         if xarray_enabled() and meta:
+            # DTD debug
+#             print("Here! is_moving = ", is_moving)
+#             print("varname, shape = ",varname, wrfin.variables[varname].shape)
             if is_moving is None:
                 is_moving = is_moving_domain(wrfin, varname, _key=_key)
             result = _build_data_array(wrfin, varname, timeidx, is_moving,
                                        multifile, _key)
+            # DTD debug
+#             print("varname, shape (after) = ",varname, result.shape)
         else:
             if not multitime:
-                result = wrfin.variables[varname][timeidx,:]
+                coord_attr = getattr(wrfin.variables[varname], "coordinates")
+                coord_names = coord_attr.split()
+                try:
+                    time_coord = coord_names[2]
+                    # DTD debug
+#                     print("C: varname, time_coord: ", varname, time_coord)
+                except IndexError:
+                    time_coord = None
+                # DTD debug
+#                 print("varname, time_coord: ", varname, time_coord)
+                if time_coord is not None:
+                    result = wrfin.variables[varname][timeidx,:]
+                    # DTD debug
+#                     print("A: result.shape: ", result.shape)
+                else:
+                    result = wrfin.variables[varname][:]
+                    # DTD debug
+#                     print("B: result.shape: ", result.shape)
                 result = result[np.newaxis, :] # So that no squeeze works
             else:
                 result = wrfin.variables[varname][:]
@@ -2222,6 +2285,11 @@ def _extract_var(wrfin, varname, timeidx, is_moving,
         # Squeeze handled in this routine, so just return it
         return combine_files(wrfin, varname, timeidx, is_moving,
                              method, squeeze, meta, _key)
+
+    # DTD debug
+#     print("varname: ", varname)
+#     if not meta:
+#         print("result.shape: ", result.shape)
 
     return result.squeeze() if squeeze else result
 
